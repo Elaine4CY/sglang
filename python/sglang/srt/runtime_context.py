@@ -875,6 +875,35 @@ class RuntimeContext:
         """
         if not fields:
             return
+        targets = self._resolve_override_targets(fields)
+        for bag, name, value in targets:
+            bag._set(name, value)
+        self._overrides_log.append((source, dict(fields)))
+
+    @contextmanager
+    def override_scoped(self, source: str, **fields):
+        """Scoped counterpart of :meth:`override`: the same routing and
+        validation, but the previous leaf values are restored on exit and
+        nothing is appended to the overrides log — it is a window on the bags,
+        not a change to the process configuration. ``source`` documents the
+        window at the call site (and in tracebacks)."""
+        targets = self._resolve_override_targets(fields)
+        saved = [
+            (bag, name, object.__getattribute__(bag, "_fields")[name])
+            for bag, name, _value in targets
+        ]
+        for bag, name, value in targets:
+            bag._set(name, value)
+        try:
+            yield self
+        finally:
+            for bag, name, value in reversed(saved):
+                bag._set(name, value)
+
+    def _resolve_override_targets(self, fields: dict) -> list:
+        """Route flat field names to their bag leaves, all-or-nothing:
+        an unknown / unprojected field aborts before any write. Returns
+        ``[(bag, leaf, value)]``."""
         bags = self._config_bags
         if bags is None:
             raise ValueError("config not published; cannot override")
@@ -902,9 +931,7 @@ class RuntimeContext:
             if name not in bag:
                 raise ValueError(f"override: field {name!r} not projected on {path!r}")
             targets.append((bag, name, value))
-        for bag, name, value in targets:
-            bag._set(name, value)
-        self._overrides_log.append((source, dict(fields)))
+        return targets
 
     def overrides_log(self) -> list:
         """Provenance of post-publish ``override`` calls: ``[(source, {field: value})]``.

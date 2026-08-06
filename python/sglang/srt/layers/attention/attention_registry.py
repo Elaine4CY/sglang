@@ -13,7 +13,6 @@ from sglang.srt.configs.linear_attn_model_registry import (
     get_linear_attn_config,
     import_backend_class,
 )
-from sglang.srt.runtime_context import get_context
 from sglang.srt.utils import get_device_capability, is_hip, is_musa, is_npu
 
 _is_musa = is_musa()
@@ -367,6 +366,7 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
             from sglang.srt.layers.attention.linear.gdn_backend import (
                 GDNAttnBackend,
                 flashinfer_gdn_prefill_default,
+                record_gdn_prefill_default,
             )
         else:
             from sglang.srt.hardware_backend.npu.attention.ascend_gdn_backend import (
@@ -383,11 +383,7 @@ def attn_backend_wrapper(runner: "ModelRunner", full_attn_backend: "AttentionBac
         prefill_default = None
         if hybrid_gdn_config(runner.model_config) is not None and not is_npu():
             prefill_default = flashinfer_gdn_prefill_default(runner)
-        if prefill_default is not None:
-            get_context().override(
-                "gdn_backend.sm100_flashinfer_default",
-                linear_attn_prefill_backend=prefill_default,
-            )
+            record_gdn_prefill_default(runner, prefill_default)
         initialize_linear_attn_config(
             runner.server_args, prefill_default=prefill_default
         )

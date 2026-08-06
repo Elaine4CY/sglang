@@ -103,6 +103,21 @@ def flashinfer_gdn_prefill_default(model_runner: ModelRunner) -> Optional[str]:
     return "flashinfer"
 
 
+def record_gdn_prefill_default(model_runner, prefill_default: Optional[str]) -> None:
+    """Record the resolved SM100 GDN prefill default on the process-wide
+    config record. A draft runner resolves its own default from its own model
+    config and mamba pool, so only the target runner's decision is the
+    process's."""
+    if prefill_default is None or model_runner.is_draft_worker:
+        return
+    from sglang.srt.runtime_context import get_context
+
+    get_context().override(
+        "gdn_backend.sm100_flashinfer_default",
+        linear_attn_prefill_backend=prefill_default,
+    )
+
+
 class GDNKernelDispatcher:
     """Dispatches GDN kernel calls to the appropriate backend per mode."""
 

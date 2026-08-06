@@ -29,6 +29,7 @@ Two declaration forms, keyed on ``hf_config.architectures[0]``:
 
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import inspect
 import logging
@@ -297,15 +298,42 @@ def mamba_extra_buffer_of(cfg: Any) -> bool:
     )
 
 
+_DRAFT_LOAD_SCOPES: List[Any] = []
+
+
+@contextlib.contextmanager
+def draft_model_load_scope():
+    """While a draft runner loads its model, load-time declarations
+    (:func:`declare_load_time_override`) apply as a scoped window on the bags:
+    visible to the draft's own construction and weight-load reads, the
+    target's values restored on exit. A draft's declaration is about *its*
+    checkpoint (quantization, weight dtypes), so it must not rewrite the
+    process-wide config record the target published."""
+    with contextlib.ExitStack() as stack:
+        _DRAFT_LOAD_SCOPES.append(stack)
+        try:
+            yield
+        finally:
+            _DRAFT_LOAD_SCOPES.pop()
+
+
 def declare_load_time_override(source: str, declared: Dict[str, Any]) -> None:
     """Declare a load-time resolved field (model-file config overrides,
     weight-resolved dtypes): validated against the resolvable whitelist, then
     written to the config bags via ``get_context().override``; ``server_args``
-    stays the pristine startup record."""
+    stays the pristine startup record.
+
+    Inside :func:`draft_model_load_scope` the write is scoped to the draft's
+    load instead of permanent."""
     from sglang.srt.runtime_context import get_context
 
     context = get_context()
     validate_declarations(context.server_args, [(source, dict(declared))])
+    if _DRAFT_LOAD_SCOPES:
+        _DRAFT_LOAD_SCOPES[-1].enter_context(
+            context.override_scoped(source, **declared)
+        )
+        return
     context.override(source, **declared)
 
 

@@ -1094,7 +1094,10 @@ class ModelRunner:
             load_format=draft_load_format,
         )
 
-        with self._load_format_scope(draft_load_format):
+        with (
+            self._load_format_scope(draft_load_format),
+            self._draft_declaration_scope(),
+        ):
             loaded = load_model_with_memory_saver(
                 server_args=self.server_args,
                 model_config=self.model_config,
@@ -1251,6 +1254,17 @@ class ModelRunner:
         if load_format is None:
             return contextlib.nullcontext()
         return get_model().override(load_format=load_format)
+
+    def _draft_declaration_scope(self):
+        """A draft's load-time declarations (``declare_load_time_override``
+        in model files, the weight-driven dtype fallback) describe *its*
+        checkpoint; scope them to the draft's load so they do not rewrite the
+        target's process-wide config record."""
+        if not self.is_draft_worker:
+            return contextlib.nullcontext()
+        from sglang.srt.arg_groups.overrides import draft_model_load_scope
+
+        return draft_model_load_scope()
 
     def _resolve_draft_load_format(self) -> Optional[str]:
         """``--speculative-draft-load-format``, for a draft runner only.
@@ -2041,9 +2055,10 @@ class ModelRunner:
         load_config: LoadConfig,
     ) -> None:
         self.model = new_model
-        get_context().override(
-            "model_runner.update_model_fields",
-            model_path=model_path,
-            load_format=load_format,
-        )
+        if not self.is_draft_worker:
+            get_context().override(
+                "model_runner.update_model_fields",
+                model_path=model_path,
+                load_format=load_format,
+            )
         self.load_config = load_config
