@@ -14,7 +14,7 @@
 """Declarative model-override registry.
 
 Model-identity adjustments to the server configuration are DECLARED here and
-materialized onto ``server_args`` at the end of ``__post_init__`` (gate
+materialized onto ``server_args`` at the end of the resolution pipeline (gate
 order, last writer wins) — model code never mutates ``ServerArgs`` fields
 imperatively.
 
@@ -149,7 +149,7 @@ class ResolvedView:
 
 # Ordered post-process passes (the normalization stage). List order is the
 # end-state execution order and mirrors today's handler call sequence in
-# __post_init__; during the transition each pass is invoked from its legacy
+# the resolution pipeline; during the transition each pass is invoked from its legacy
 # slot via run_post_process_pass, so ordering is preserved byte-for-byte.
 POST_PROCESS_PASSES: List[Callable[..., dict]] = []
 
@@ -179,7 +179,7 @@ def run_post_process_pass(server_args: Any, fn: Callable[..., dict]) -> None:
 
     Evaluates the pass on the resolving state (a read-only view with the
     accumulated declarations overlaid from the stash) and appends its
-    declaration to the stash. During ``__post_init__`` the fields stay
+    declaration to the stash. During resolution the fields stay
     untouched — ``materialize_declarations`` applies the whole stash once at
     the end of resolution; a pass invoked after materialization (a post-init
     slot) writes through immediately.
@@ -198,7 +198,7 @@ def run_post_process_pass(server_args: Any, fn: Callable[..., dict]) -> None:
             # that never ran the monolith dispatch (which owns the stash);
             # create it lazily. Real publishes always pass through the
             # dispatch first — the dispatch ASSIGNS the stash, so pass slots
-            # must sit at or after it in __post_init__ order.
+            # must sit at or after it in resolution-pipeline order.
             stash = server_args._resolved_overrides = []
         stash.append(entry)
         validate_declarations(server_args, [entry])
@@ -220,7 +220,7 @@ def _apply_fields(server_args: Any, fields: Dict[str, Any]) -> None:
 def declare_late_resolution(server_args: Any, source: str, **fields: Any) -> None:
     """Resolve fields on a config that is **not published yet**.
 
-    A few resolution rules cannot run inside ``__post_init__``: LoRA
+    A few resolution rules cannot run inside the resolution pipeline: LoRA
     normalization and the auto-parser detection need the launcher's validation
     stage (and, for the parsers, a tokenizer / chat-template load). They still
     belong to the resolution pipeline — they decide what the process will run
@@ -254,7 +254,7 @@ def declare_late_resolution(server_args: Any, source: str, **fields: Any) -> Non
 
 def materialize_declarations(server_args: Any) -> None:
     """Apply the accumulated declarations onto ``server_args`` once, at the
-    end of ``__post_init__`` (gate order: last writer wins). After this the
+    end of the resolution pipeline (gate order: last writer wins). After this the
     fields carry the resolved configuration — every post-init reader, in any
     process, reads them directly; ``resolved_view`` remains an internal
     helper for mid-resolution code only."""
@@ -266,7 +266,7 @@ def materialize_declarations(server_args: Any) -> None:
 
 def resolved_view(server_args: Any) -> ResolvedView:
     """Read-only view of the resolving configuration for mid-resolution code
-    that is not a pass (``__post_init__`` handlers and hooks). Internal to
+    that is not a pass (resolution handlers and hooks). Internal to
     the resolution pipeline: after ``materialize_declarations`` runs, the
     fields themselves carry the resolved values — read them directly."""
     return ResolvedView(server_args, overlay=_declaration_overlay(server_args))
@@ -1191,7 +1191,7 @@ def _inkling_overrides(server_args: Any, hf_config: Any) -> dict:
     hybrid-SWA layout, the extra-buffer mamba strategy, and the unified radix
     tree (which Inkling requires — models/inkling.py asserts it). The full-graph
     prefill default is set separately (inline, before cuda-graph resolution) —
-    see ServerArgs.__post_init__ / _apply_inkling_prefill_cuda_graph_default. The
+    see ServerArgs._run_resolution_pipeline / _apply_inkling_prefill_cuda_graph_default. The
     server-arg defaults each yield to an explicit user value (compared against
     the ServerArgs class default); the prefill declaration is materialized
     before _parse_cuda_graph_config folds cuda_graph_backend_prefill into
@@ -1202,7 +1202,7 @@ def _inkling_overrides(server_args: Any, hf_config: Any) -> dict:
 
     overrides: Dict[str, Any] = {}
     # NOTE: the full-graph prefill default is NOT set here. cuda-graph config is
-    # resolved in __post_init__ before declarations are materialized, so a
+    # resolved in the pipeline before declarations are materialized, so a
     # cuda_graph_backend_prefill declared here lands too late (the breakable
     # default would already have been auto-disabled for this multimodal arch).
     # It is set inline before _handle_cuda_graph_config instead.
@@ -1458,7 +1458,7 @@ def _step3p_overrides(server_args: Any, hf_config: Any) -> dict:
 
 # ---------------------------------------------------------------------------
 # Post-process passes (normalization stage), in end-state execution order.
-# Faithful ports of the legacy __post_init__ handlers; each is invoked from
+# Faithful ports of the legacy resolution handlers; each is invoked from
 # its legacy slot via run_post_process_pass during the transition.
 # ---------------------------------------------------------------------------
 

@@ -241,6 +241,9 @@ class Engine(EngineScoreMixin, EngineBase):
                 # Do not print logs by default
                 kwargs["log_level"] = "error"
             server_args = self.server_args_class(**kwargs)
+        # Covers both branches: a kwargs-construct is raw, and an externally
+        # passed object may be; a resolved one no-ops.
+        server_args.resolve()
         self.server_args = server_args
         logger.info(f"{server_args=}")
 

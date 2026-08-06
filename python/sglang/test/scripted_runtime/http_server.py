@@ -257,4 +257,4 @@ def _spawn_server_process(
 
 
 def _launch_scripted_http_server(**engine_kwargs: Any) -> None:
-    launch_server(ServerArgs(**engine_kwargs))
+    launch_server(ServerArgs(**engine_kwargs).resolve())

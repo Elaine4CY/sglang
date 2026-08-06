@@ -392,7 +392,9 @@ class Runtime:
         for port in range(requested_port, 40000):
             if is_port_available(port):
                 break
-        self.server_args = ServerArgs(*args, log_level=log_level, port=port, **kwargs)
+        self.server_args = ServerArgs(
+            *args, log_level=log_level, port=port, **kwargs
+        ).resolve()
 
         self.url = self.server_args.url()
         self.generate_url = self.url + "/generate"

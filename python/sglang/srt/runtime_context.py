@@ -403,7 +403,7 @@ class Flags(_FlagGroupBase):
     """Root of the runtime-flags tier.
 
     Resolved configuration lives on ``server_args`` fields (materialized at
-    the end of ``__post_init__``) — this tier only carries genuine runtime
+    the end of resolution) — this tier only carries genuine runtime
     state whose value is not a function of the configuration alone, grouped
     by lifecycle (``capture``) or subsystem (``moe`` / ``dp``).
     """
@@ -805,7 +805,7 @@ class RuntimeContext:
         per test; production ordering discipline lives at the call-sites, e.g.
         the draft-worker guard in ``ModelRunner.__init__``). The published
         object already carries the resolved configuration (declarations
-        materialize at the end of ``__post_init__``).
+        materialize at the end of resolution).
         """
         # Seed the capture tier for the new lifecycle (defaults for sentinel
         # and mock publishes, which carry no config).
@@ -1326,6 +1326,11 @@ def publish(server_args, *, role: str, hf_config: Any = None) -> RuntimeContext:
             f"publish role {role!r} has no ROLE_NAMESPACE_SETS entry; declare "
             "its namespace set (None for the full tree)."
         )
+    # Construction parses; resolution runs here at the latest. A config that
+    # arrived resolved (the CLI boundary, a parent process's pickle) no-ops.
+    resolve = getattr(server_args, "resolve", None)
+    if resolve is not None:
+        resolve()
     _CONTEXT.set_server_args(server_args)
     _CONTEXT._publish_role = role
     if _ROLE_NS_MODE == "record":

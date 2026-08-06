@@ -78,7 +78,7 @@ class Arg:
     # When True, this field may be written by config resolution (model
     # overrides and post-process passes): it is part of the whitelist accepted
     # by the declaration stash, and its resolved value materializes onto the
-    # field at the end of __post_init__.
+    # field at the end of resolution.
     resolvable: bool = False
 
 

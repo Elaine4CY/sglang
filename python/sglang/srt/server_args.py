@@ -3434,6 +3434,40 @@ class ServerArgs:
     ] = None
 
     def __post_init__(self):
+        """Construction parses; it does not resolve.
+
+        A bare ``ServerArgs(...)`` is the literal input record. The resolution
+        pipeline (:meth:`_run_resolution_pipeline`) runs once, via
+        :meth:`resolve` — called at the CLI/entrypoint boundary
+        (``from_cli_args``, ``Engine``) and as a safety net by ``publish``.
+        Only the declaration stash and the ``return_hidden_states`` alias
+        normalization (two coupled CLI surfaces, needed on dummy configs too)
+        happen at construction.
+        """
+        # Declaration stash for the override/post-process passes. Set at
+        # construction so run_post_process_pass and direct handler invocations
+        # can rely on it even when resolution never runs (dummy configs,
+        # handler-level unit fixtures).
+        self._resolved_overrides = []
+        self._handle_return_hidden_states_mode()
+
+    def resolve(self) -> ServerArgs:
+        """Run the resolution pipeline once, in place; returns self.
+
+        Idempotent: a resolved (materialized) config no-ops, so the CLI
+        boundary, ``Engine``, and ``publish`` may each call it. The
+        ``none``/``dummy`` model boundary short-circuits — those configs stay
+        raw (tests mark ``_declarations_materialized`` through the
+        ``override_server_args`` primitive instead).
+        """
+        if self.model_path.lower() in ["none", "dummy"]:
+            return self
+        if getattr(self, "_declarations_materialized", False):
+            return self
+        self._run_resolution_pipeline()
+        return self
+
+    def _run_resolution_pipeline(self):
         """
         Orchestrates the handling of various server arguments, ensuring proper configuration and validation.
 
@@ -3441,32 +3475,18 @@ class ServerArgs:
         1. Keep this method as an ordered dispatcher. Each step should be a
            named self._handle_* call; put imports, conditionals, mutations, and
            raises inside helpers instead of inline here.
-        2. Keep the dummy-model boundary as early as correctness allows. Only
-           model-independent bootstrap, API/network/protocol validation, and
-           errors that should fire for dummy models should run before it.
-        3. Order handlers by dependency domains, not by historical insertion:
+        2. Order handlers by dependency domains, not by historical insertion:
            internal/bootstrap, API/network/protocol, model source/path
            resolution, hardware/platform, model-specific adjustment,
            parallelism, kernel/attention backend, cuda graph, memory/cache,
            and advanced/debug features.
-        4. Hide narrow integrations behind general handler names. The
+        3. Hide narrow integrations behind general handler names. The
            dispatcher should say what phase is being handled, not expose a
            vendor-, hook-, or feature-specific implementation detail.
-        5. Give each handler one clear contract: what state it expects, what it
+        4. Give each handler one clear contract: what state it expects, what it
            may mutate, and whether it validates only. Long ordering comments
            belong in the helper or signal that the helper should be split.
         """
-
-        # Declaration stash for the override/post-process passes. Set before any
-        # short-circuit (none/dummy model paths) so run_post_process_pass and
-        # direct handler invocations can rely on it even when
-        # _handle_model_specific_adjustments never runs.
-        self._resolved_overrides = []
-
-        self._handle_return_hidden_states_mode()
-        if self.model_path.lower() in ["none", "dummy"]:
-            return
-
         self._handle_model_source_paths()
 
         # Validate mm_process_config.
@@ -8470,7 +8490,8 @@ class ServerArgs:
         attrs = [
             attr.name for attr in dataclasses.fields(cls) if hasattr(args, attr.name)
         ]
-        return cls(**{attr: getattr(args, attr) for attr in attrs})
+        # The CLI boundary hands out resolved configs.
+        return cls(**{attr: getattr(args, attr) for attr in attrs}).resolve()
 
     def get_tokenizer_worker_class(self):
         from sglang.srt.managers.multi_tokenizer_mixin import TokenizerWorker

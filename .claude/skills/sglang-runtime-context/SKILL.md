@@ -52,7 +52,7 @@ resolved configuration lives in the namespace bags.**
   There is no in-place mutation entry on the instance at all: it is read-only after
   resolution.
 - **Late launcher-stage resolution (pre-publish)**: a few rules cannot run inside
-  `__post_init__` — LoRA normalization, and the auto-parser detection that needs a
+  the resolution pipeline — LoRA normalization, and the auto-parser detection that needs a
   tokenizer/chat-template load. They are resolution, not mutation, and they write
   **in place** via `arg_groups.overrides.declare_late_resolution(server_args,
   source, **fields)`, which refuses the published instance. In place is the point:
@@ -61,7 +61,10 @@ resolved configuration lives in the namespace bags.**
   variant here is a bug: the launcher rebinds its local and everyone else keeps the
   unresolved object.
 - **A config another runner / worker / process is built from**: `server_args.derive(
-  source, **fields)` returns a variant (an encode worker's `base_gpu_id`/`tp_size`).
+  source, **fields)` returns a variant. In-tree production no longer derives —
+  every such value travels as a constructor argument (the draft runner's
+  attention backend, the encoder DP worker's `gpu_id`); the mechanism remains
+  for test fixtures and out-of-tree callers.
   The receiver — and any bags projected from it — are untouched; resolution does
   **not** re-run, so do not reach for it to "re-resolve" a config.
 - **Per-runner values inside one process are constructor arguments, not a variant.**
@@ -123,10 +126,13 @@ this).
 
 ### Mid-resolution reads (inside the pipeline only)
 
-Resolution itself still runs in `__post_init__`: handlers and hooks read the
-in-flight state through `resolved_view(server_args)` / `self._resolved()`, fields are
+Construction parses; it does not resolve. The pipeline
+(`ServerArgs._run_resolution_pipeline`) runs once via `server_args.resolve()` —
+called at the CLI boundary (`from_cli_args`), by `Engine`, and as a safety net by
+`publish` (a materialized config no-ops). Handlers and hooks read the in-flight
+state through `resolved_view(server_args)` / `self._resolved()`, fields are
 read-only during resolution, and declarations materialize once at the very end of
-`__post_init__` (gate order, last writer wins) — *then* `publish` snapshots the
+the pipeline (gate order, last writer wins) — *then* `publish` snapshots the
 resolved values into the bags. `resolved_view` is pipeline-internal
 (`server_args.py` / `arg_groups/`, plus helpers the pipeline itself invokes
 mid-resolution, e.g. `adaptive_spec_params`); do not introduce new
@@ -156,7 +162,8 @@ dataclass. A declaration against a non-whitelisted field fails at its slot.
 
 ### Load-time vs resolution-time (critical)
 
-`__post_init__` runs in the launcher process before any model/platform import. Logic that
+Resolution runs in the launcher process (the CLI boundary resolves at construct
+time) before any model/platform import. Logic that
 consults an **extensible registry** (e.g. out-of-tree platforms registering attention
 backends in `init_backend()`, which runs at `model_runner` import) must stay at load time
 (ModelRunner init), writing through `get_context().override()`. Before moving any
@@ -229,8 +236,10 @@ ONE thread — do not design for TBO threads that don't exist.
   them explicitly on the mock; `MagicMock(spec=...)` raises on attributes that only
   exist post-`__init__`, which is the fastest way to find a missed stub.
 - `reset_context()` in teardown when a test publishes outside a scoped override.
-- `ServerArgs(model_path="dummy")` early-returns `__post_init__` (no materialization, no
-  strict guard) — fine for lightweight fixtures.
+- `ServerArgs(model_path="dummy")` never resolves (`resolve()` short-circuits: no
+  materialization, no strict guard) — fine for lightweight fixtures. A bare
+  construct of a *real* path is raw too; a fixture that needs resolved fields
+  calls `.resolve()` explicitly.
 - **Run changed test files per-file** (own process), the way CI does: a monolithic local
   pytest run lets a context published by an earlier file mask a missing-publish bug in a
   later one.

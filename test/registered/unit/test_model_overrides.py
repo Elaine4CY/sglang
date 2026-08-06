@@ -299,7 +299,7 @@ class TestGoldenModelOverrides(_IsolatedPublish):
         self.addCleanup(shutil.rmtree, config_dir, ignore_errors=True)
         with open(os.path.join(config_dir, "config.json"), "w") as f:
             json.dump(config, f)
-        return ServerArgs(model_path=config_dir, **server_kwargs)
+        return ServerArgs(model_path=config_dir, **server_kwargs).resolve()
 
     def _publish(self, server_args):
         from sglang.srt.server_args import (
