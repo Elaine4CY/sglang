@@ -68,6 +68,34 @@ class TestNoServerArgsMutationEntry(CustomTestCase):
                 "declare_late_resolution(...) for pre-publish launcher resolution."
             )
 
+    def test_production_derives_nothing(self):
+        """``derive`` remains an API (test fixtures, out-of-tree callers), but
+        every in-tree production value that once needed a config variant now
+        travels per runner — a new site is a design smell, not a convenience."""
+        derive_pattern = re.compile(r"\.derive\(")
+        allowed = {
+            "srt/runtime_context.py",  # the override_server_args test primitive
+            "srt/server_args.py",  # defines the API; guard messages name it
+            "test/kits/attention_unittest/runner_modes/speculative_draft_runner.py",
+        }
+        offenders = []
+        for path in sorted(_SGLANG_ROOT.rglob("*.py")):
+            rel = path.relative_to(_SGLANG_ROOT).as_posix()
+            if rel.startswith(_EXCLUDED) or rel in allowed:
+                continue
+            source = path.read_text()
+            for match in derive_pattern.finditer(source):
+                line = source.count("\n", 0, match.start()) + 1
+                offenders.append(f"{rel}:{line}")
+        self.assertFalse(
+            offenders,
+            "new ServerArgs.derive call-sites in the package:\n"
+            + "\n".join(offenders)
+            + "\n\nA value one runner consumes travels as a constructor "
+            "argument (draft_attention_backend, MMEncoder gpu_id); a scoped "
+            "construction-time read uses get_<ns>().override(...).",
+        )
+
     def test_late_resolution_refuses_the_published_config(self):
         from sglang.srt.arg_groups.overrides import declare_late_resolution
         from sglang.srt.runtime_context import get_context

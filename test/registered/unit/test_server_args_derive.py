@@ -2,9 +2,11 @@
 
 After resolution the instance is the process's read-only startup record and the
 object the config bags were projected from, so it cannot be mutated: a change to
-resolved config goes to the bags (``get_context().override``), and a config that
-differs for one runner or worker — a draft's context length, an encode worker's
-device — is a second object.
+resolved config goes to the bags (``get_context().override``), a value one
+runner owns travels as a constructor argument, and a config that genuinely
+differs for another worker is a second object. In production nothing derives
+any more — the mechanism remains for test fixtures (``override_server_args``)
+and out-of-tree callers, under the contracts pinned here.
 """
 
 from sglang.test.ci.ci_register import register_cpu_ci
