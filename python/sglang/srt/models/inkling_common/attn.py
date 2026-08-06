@@ -50,6 +50,20 @@ else:
     _cute_import_error = None
 
 
+def active_attention_backend_str(forward_batch) -> str:
+    """The attention backend running THIS forward: the name stamped per runner
+    on the active backend object (a draft's can differ from the target's),
+    falling back to the process config for unstamped backends."""
+    from sglang.srt.model_executor.forward_context import get_attn_backend
+
+    backend = get_attn_backend()
+    if forward_batch.forward_mode.is_decode_or_idle():
+        stamped = backend.decode_attention_backend_str
+    else:
+        stamped = backend.prefill_attention_backend_str
+    return stamped or get_exec().kernel.attention_backend
+
+
 @cache
 def get_inkling_relative_attention_score_mod(rel_extent: int) -> Callable:
     if cute is None or Float32 is None or SeqlenInfoQK is None:
@@ -727,7 +741,7 @@ class InklingAttention(nn.Module):
 
         apply_log_scaling = log_scaling_tau is not None and not self.is_local
 
-        attention_backend = get_exec().kernel.attention_backend
+        attention_backend = active_attention_backend_str(forward_batch)
         assert attention_backend in ("fa4", "triton")
         # The overlap threads a CUDA event into the FA4 sheared-bias kernel, so it
         # is FA4-only for now.
